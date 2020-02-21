@@ -7,28 +7,35 @@ import requests
 class WebIseClient:
     HTTPS_PROTOCOL = "https"
     headers = {
-        # 'Content-Type': 'application/x-www-form-urlencoded',
         'Origin': 'https://10.66.72.69',
         'DNT': '1',
         'Referer': 'https://10.66.72.69/admin/login.jsp',
     }
+
+    @property
+    def headers(self):
+        if not self._headers:
+            self._headers = {
+                'Origin': self._get_url_root(path=""),
+                'DNT': '1',
+                'Referer': self._get_url_root(path="/admin/login.jsp"),
+            }
+        return self._headers
 
     def __init__(
             self,
             username: str,
             password: str,
             hostname: str,
-            port: int = 9060,
             verify_certificate: bool = True
     ):
 
+        self._headers = {}
         self._username = username
         self._password = password
         self._hostname = hostname
-        self._port = port
 
         self._http_session = requests.Session()
-
         self._http_session.verify = verify_certificate
 
     def __enter__(self):
@@ -81,7 +88,6 @@ class WebIseClient:
 
         parser = ParseResult(
             scheme=scheme,
-            # netloc=f"{self._hostname}:{self._port}",
             netloc=f"{self._hostname}",
             path=path,
             params='', query='', fragment=''
@@ -96,7 +102,7 @@ class WebIseClient:
 
         idx_start = html.find(owasp_key)
         if idx_start == -1:
-            raise Exception("No se encontro el CSRFTOKEN")
+            raise Exception("CSRFTOKEN not found")
         idx_start += len_owasp_key
 
         csrftoken = html[idx_start: idx_start + len_csrftoken]
@@ -132,12 +138,16 @@ class WebIseClient:
             headers=self.headers,
         )
 
-        response_as_json = response_create_identity_group.json()
+        if response_create_identity_group.status_code != HTTPStatus.OK:
+            raise Exception("Error creating identity group: Unknown error")
+
+        try:
+            response_as_json = response_create_identity_group.json()
+        except ValueError:
+            raise Exception("Error creating identity group: Response format is not Json")
 
         if response_as_json["respCode"] != "Success":
             raise Exception("Error creating identity group: {}".format(response_as_json["respMsg"]))
-
-        return response_as_json
 
     def create_policy_set(self, police_name: str, identity_group: str, profiles: list):
         response_form = self._http_session.get(
@@ -214,3 +224,7 @@ class WebIseClient:
 
         if response_commit.status_code != HTTPStatus.OK:
             raise Exception("Error creating policy set: Can't commit transaction")
+
+        for item in response_commit.json()["innerResults"]:
+            if item["status"] != HTTPStatus.CREATED:
+                raise Exception("Error creating policy set: {}".format(item))
