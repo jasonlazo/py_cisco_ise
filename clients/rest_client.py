@@ -20,8 +20,7 @@ class RestIseClient:
     def __enter__(self):
         return self
 
-    def __exit__(self):
-        pass
+
 
     def _parse_url(self, path: str):
         parser = ParseResult(
