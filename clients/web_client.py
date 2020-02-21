@@ -1,9 +1,10 @@
+from http import HTTPStatus
 from urllib.parse import ParseResult
 
 import requests
 
 
-class CiscoIseClient:
+class WebIseClient:
     HTTPS_PROTOCOL = "https"
     headers = {
         # 'Content-Type': 'application/x-www-form-urlencoded',
@@ -18,7 +19,7 @@ class CiscoIseClient:
             password: str,
             hostname: str,
             port: int = 9060,
-            ignore_certificate: bool = True
+            verify_certificate: bool = True
     ):
 
         self._username = username
@@ -27,11 +28,18 @@ class CiscoIseClient:
         self._port = port
 
         self._http_session = requests.Session()
-        if ignore_certificate:
-            self._http_session.verify = False
+
+        self._http_session.verify = verify_certificate
+
+    def __enter__(self):
+        self.login()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.logout()
 
     def login(self):
-        data = {
+        body = {
             'username': self._username,
             'password': self._password,
             'rememberme': 'on',
@@ -41,116 +49,68 @@ class CiscoIseClient:
             'destinationURL': '',
             'xeniaUrl': '',
         }
-        res = self._http_session.post(
-            url='https://10.66.72.69/admin/LoginAction.do',
-            data=data,
+        response = self._http_session.post(
+            url=self._get_url_root(path="/admin/LoginAction.do"),
+            data=body,
             headers=self.headers
         )
-        if not ("load-message" in res.text):
+        if not ("load-message" in response.text):
             raise Exception("No ha podido iniciar sesion")
 
-    def _parse_url(self, path: str, params: dict = {}, scheme: str = HTTPS_PROTOCOL, is_rest: bool = True):
-        params = params if params else {}
-        if not params:
-            for k, d in params.items():
-                pass
+    def logout(self):
+        prev_session_id = self._http_session.cookies.get_dict().get("APPSESSIONID", None)
+
+        if prev_session_id:
+            response = self._http_session.get(
+                url=self._get_url_root(path="/admin/logout.jsp")
+            )
+            post_session_id = self._http_session.cookies.get_dict().get("APPSESSIONID", None)
+
+            if prev_session_id == post_session_id:
+                raise Exception("Not logout: Same SessionId")
+
+            if any([
+                len(response.history) != 3,
+                not all([item.status_code == HTTPStatus.FOUND for item in response.history])
+            ]):
+                raise Exception("Not logout: Response not expected")
+        else:
+            raise Exception(f"Not previous SessionId: APPSESSIONID:[{prev_session_id}]")
+
+    def _get_url_root(self, path: str, scheme: str = HTTPS_PROTOCOL, **kwargs):
 
         parser = ParseResult(
             scheme=scheme,
-            netloc=f"{self._hostname}:{self._port}" if is_rest else self._hostname,
+            # netloc=f"{self._hostname}:{self._port}",
+            netloc=f"{self._hostname}",
             path=path,
             params='', query='', fragment=''
         )
         return parser.geturl()
 
-    def _send_req(self, url, body):
-        headers = {'Content-type': 'application/json'}
-        res = requests.post(
-            url,
-            json=body,
-            auth=(self._username, self._password),
-            verify=False,
-            headers=headers
+    @staticmethod
+    def _get_csrftoken(html: str):
+        owasp_key = "OWASP_CSRFTOKEN="
+        len_owasp_key = len(owasp_key)
+        len_csrftoken = 39
 
-        )
+        idx_start = html.find(owasp_key)
+        if idx_start == -1:
+            raise Exception("No se encontro el CSRFTOKEN")
+        idx_start += len_owasp_key
 
-        return res
-
-    def create_group(self):
-        _ = self.url
-        _ = 'https://10.66.72.69:9060/ers/config/identitygroup'
-        res = self._send_req(
-            url=_,
-            body={
-                "IdentityGroup": {
-
-                    "id": "id",
-
-                    "name": "test_24",
-
-                    "description": "description",
-
-                    "parent": "parent"
-
-                }
-            }
-        )
-        print(res)
-
-    def create_internal_user(self, **kwargs):
-        body = {
-            "InternalUser": {
-                "id": "id",
-                "name": "jlazo.soft.com",
-                "description": "description",
-                "enabled": False,
-                "email": "email@domain.com",
-                # "password": "PEPito-5764333$%&!\"$%&'()*+,-./:;<=>?[\\]^_`{|}~",
-                "password": "_a7Ocmfp",
-                "firstName": "jason",
-                "lastName": "lazo locke",
-                "changePassword": False,
-                "identityGroups": "grupo_001",
-                "expiryDateEnabled": False,
-                "expiryDate": "2026-12-11",
-                "enablePassword": "enablePassword",
-                "customAttributes": {
-                    "key1": "value1",
-                    "key2": "value3"
-                },
-                "passwordIDStore": "Internal Users"
-            }
-        }
-
-        res = self._send_req(
-            url=self._parse_url(path="/ers/config/internaluser"),
-            body=body
-        )
-
-        print(res)
+        csrftoken = html[idx_start: idx_start + len_csrftoken]
+        return csrftoken
 
     def create_identity_group(self, group_name: str, group_description: str = ""):
-        def _get_csrftoken(html: str):
-            owasp_key = "OWASP_CSRFTOKEN="
-            len_owasp_key = len(owasp_key)
-            len_csrftoken = 39
-
-            idx_start = html.find(owasp_key)
-            if idx_start == -1:
-                raise Exception("No se encontro el CSRFTOKEN")
-            idx_start += len_owasp_key
-
-            csrftoken = html[idx_start: idx_start + len_csrftoken]
-            return csrftoken
 
         response_form = self._http_session.get(
-            # url="https://10.66.72.69/admin/idMgmtEndpointGroupAction.do?command=createPreload",
-            url=self._parse_url(path="/admin/idMgmtEndpointGroupAction.do", is_rest=False),
+            url=self._get_url_root(path="/admin/idMgmtEndpointGroupAction.do"),
             params=dict(command="createPreload"),
             headers=self.headers
         )
 
-        owasp_csrftoken = _get_csrftoken(response_form.text)
+        owasp_csrftoken = self._get_csrftoken(response_form.text)
 
         body = {
             'selectedItemName': '',
@@ -163,12 +123,10 @@ class CiscoIseClient:
             'nsfIdGroup.name': group_name,
             'nsfIdGroup.description': group_description,
             'OWASP_CSRFTOKEN': owasp_csrftoken,
-            # 'dojo.preventCache': '1581508490471',
         }
 
         response_create_identity_group = self._http_session.post(
-            # url="https://10.66.72.69/admin/idMgmtUserGroupAction.do?command=save",
-            url=self._parse_url(path="/admin/idMgmtUserGroupAction.do", is_rest=False),
+            url=self._get_url_root(path="/admin/idMgmtUserGroupAction.do"),
             params=dict(command="save"),
             data=body,
             headers=self.headers,
@@ -177,6 +135,82 @@ class CiscoIseClient:
         response_as_json = response_create_identity_group.json()
 
         if response_as_json["respCode"] != "Success":
-            raise Exception(response_as_json["respMsg"])
+            raise Exception("Error creating identity group: {}".format(response_as_json["respMsg"]))
 
-        print(response_create_identity_group)
+        return response_as_json
+
+    def create_policy_set(self, police_name: str, identity_group: str, profiles: list):
+        response_form = self._http_session.get(
+            url=self._get_url_root(
+                path="/admin/login.jsp#workcenters/workcenter_guest_access/workcenter_guest_access_policy_sets_new"
+            ),
+            params=dict(command="createPreload"),
+            headers=self.headers
+        )
+
+        owasp_csrftoken = self._get_csrftoken(response_form.text)
+
+        headers = {
+            'X-Requested-With': 'XMLHttpRequest, OWASP CSRFGuard Project',
+            'OWASP_CSRFTOKEN': owasp_csrftoken,
+        }
+
+        response_begin_transaction = self._http_session.post(
+            url=self._get_url_root(
+                path="/admin/rs/uiapi/policy/transactionmanager/begintransaction"
+            ),
+            params=dict(),
+            headers={**self.headers, **headers}
+        )
+
+        if response_begin_transaction.status_code != HTTPStatus.OK:
+            raise Exception("Error creating policy set: Can't start transaction")
+
+        try:
+            transaction_id = response_begin_transaction.headers["transaction_id"]
+        except KeyError:
+            raise Exception("Error creating policy set: Not transaction_id on response headers")
+
+        body = {
+            "state": "ENABLED",
+            "name": police_name,
+            "conditionObject": {
+                "Field1": {
+                    "type": "SINGLE",
+                    "not": "",
+                    "conditionId": None,
+                    "attributes": {
+                        "lhsDictionary": "IdentityGroup", "lhsAttribute": "Name",
+                        "operator": "IN",
+                        "attributeNameType": "STRING", "attributeValueType": "STATIC",
+                        "attributeValue": "Endpoint Identity Groups:All Groups:{identity_group}".format(
+                            identity_group=identity_group)
+                    }
+                }
+            },
+            "results": {
+                "Profiles": profiles
+            },
+            "rank": 0
+        }
+
+        response_create_policy_set = self._http_session.post(
+            url=self._get_url_root(
+                path="/admin/rs/uiapi/policytable/radius/a875490e-e4ab-4e46-90b4-8de8d17e5085/authorization"
+            ),
+            params=dict(transaction_id=transaction_id),
+            headers={**self.headers, **headers},
+            json=body
+        )
+
+        if response_create_policy_set.status_code != HTTPStatus.ACCEPTED:
+            raise Exception("Error creating policy set: Policy Set not valid")
+
+        response_commit = self._http_session.post(
+            url=self._get_url_root(path="/admin/rs/uiapi/policy/transactionmanager/committransaction"),
+            params=dict(transaction_id=transaction_id),
+            headers={**self.headers, **headers}
+        )
+
+        if response_commit.status_code != HTTPStatus.OK:
+            raise Exception("Error creating policy set: Can't commit transaction")

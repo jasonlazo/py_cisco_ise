@@ -1,8 +1,8 @@
 from enum import Enum
 from http import HTTPStatus
 
-import http_methods
-from rest_requests import CiscoIseRequest
+from py_cisco_ise import http_methods
+from py_cisco_ise.rest_requests.base import CiscoIseRequest
 
 
 class InternalUser(Enum):

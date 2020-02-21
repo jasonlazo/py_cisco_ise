@@ -3,10 +3,11 @@ from urllib.parse import ParseResult
 
 import requests
 
-from rest_requests import CiscoIseRequest, get_path, get_body
+from py_cisco_ise.rest_requests import get_path, get_body
+from py_cisco_ise.rest_requests.base import CiscoIseRequest
 
 
-class CiscoIseRestClient:
+class RestIseClient:
 
     def __init__(self, username, password, hostname, port=9060, **kwargs):
         self._username = username
@@ -15,6 +16,12 @@ class CiscoIseRestClient:
         self._port = port
         self._scheme = kwargs.get("scheme", "https")
         self._verify_ssl = kwargs.get("verify_ssl", True)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self):
+        pass
 
     def _parse_url(self, path: str):
         parser = ParseResult(

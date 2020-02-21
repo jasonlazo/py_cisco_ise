@@ -1,10 +1,7 @@
-from rest_requests.base import CiscoIseRequest
-
-
-def get_path(path_template: str, path_parms: list):
+def get_path(path_template: str, path_parms: dict):
     try:
-        path_template = path_template.format(*path_parms)
-    except IndexError:
+        path_template = path_template.format(**path_parms)
+    except KeyError:
         raise Exception(
             "Less params than required: path [{}] params[{}]".format(path_template, path_parms)
         )
@@ -25,3 +22,22 @@ def get_body(body_template: dict, body_params: dict):
             raise Exception("Not allowed key")
 
     return body_template
+
+
+def iterate_over_pages(rest_client, *args, **kwargs):
+    run = True
+    kwargs["path_params"] = kwargs.get("path_params", {})
+    kwargs["path_params"]["size"] = 20
+    kwargs["path_params"]["page"] = 1
+
+    while run:
+        response = rest_client.send_request(
+            *args,
+            **kwargs
+        )["SearchResult"]
+
+        for response_item in response["resources"]:
+            yield response_item
+
+        run = bool(response["nextPage"]["href"])
+        kwargs["path_params"]["page"] += 1
